@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 )
 
 var errVerificationFailed = errors.New("verification failed")
@@ -201,20 +200,4 @@ func (systemCommandRunner) runInDir(
 
 func (systemCommandRunner) output(ctx context.Context, name string, args ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, name, args...).CombinedOutput()
-}
-
-func countdown(ctx context.Context, output io.Writer, seconds int) error {
-	for remaining := seconds; remaining > 0; remaining-- {
-		fmt.Fprintf(output, "Burning in %d...\n", remaining)
-		timer := time.NewTimer(time.Second)
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				<-timer.C
-			}
-			return context.Cause(ctx)
-		case <-timer.C:
-		}
-	}
-	return nil
 }

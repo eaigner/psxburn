@@ -154,9 +154,6 @@ func TestBurnWorkflowRedetectsAndUnmountsFinalizedDisc(t *testing.T) {
 			}
 			return "/dev/disk5", nil
 		},
-		waitBeforeBurn: func(context.Context, io.Writer, int) error {
-			return nil
-		},
 	}
 	err := app.execute(context.Background(), image{
 		cuePath:    cuePath,
@@ -213,9 +210,6 @@ func TestBurnWorkflowStopsWhenFinalizedDiscDoesNotBecomeReady(t *testing.T) {
 		},
 		waitForDisc: func(context.Context, commandRunner, string) (string, error) {
 			return "", errors.New("raw device unavailable")
-		},
-		waitBeforeBurn: func(context.Context, io.Writer, int) error {
-			return nil
 		},
 	}
 	err := app.execute(context.Background(), image{cuePath: cuePath}, false)

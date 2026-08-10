@@ -10,13 +10,12 @@ import (
 )
 
 type application struct {
-	commands       commandPaths
-	runner         commandRunner
-	stdout         io.Writer
-	stderr         io.Writer
-	waitBeforeBurn func(context.Context, io.Writer, int) error
-	readDisc       func(context.Context, string, string, []sectorRange) error
-	waitForDisc    func(context.Context, commandRunner, string) (string, error)
+	commands    commandPaths
+	runner      commandRunner
+	stdout      io.Writer
+	stderr      io.Writer
+	readDisc    func(context.Context, string, string, []sectorRange) error
+	waitForDisc func(context.Context, commandRunner, string) (string, error)
 }
 
 func (app application) execute(ctx context.Context, image image, verifyOnly bool) error {
@@ -29,13 +28,6 @@ func (app application) execute(ctx context.Context, image image, verifyOnly bool
 	}
 
 	if !verifyOnly {
-		waitBeforeBurn := app.waitBeforeBurn
-		if waitBeforeBurn == nil {
-			waitBeforeBurn = countdown
-		}
-		if err := waitBeforeBurn(ctx, app.stdout, 3); err != nil {
-			return fmt.Errorf("burn cancelled: %w", err)
-		}
 		if err := app.runner.runInDir(
 			ctx,
 			filepath.Dir(image.cuePath),
