@@ -83,7 +83,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 
-	commands, err := findCommands()
+	commands, err := findCommands(*verifyOnly)
 	if err != nil {
 		return err
 	}
@@ -128,12 +128,13 @@ func selectCuePath(args []string, directory string) (string, error) {
 }
 
 type commandPaths struct {
+	cdrecord string
 	cdrdao   string
 	drutil   string
 	diskutil string
 }
 
-func findCommands() (commandPaths, error) {
+func findCommands(verifyOnly bool) (commandPaths, error) {
 	find := func(name string) (string, error) {
 		path, err := exec.LookPath(name)
 		if err != nil {
@@ -142,6 +143,14 @@ func findCommands() (commandPaths, error) {
 		return path, nil
 	}
 
+	var cdrecord string
+	var err error
+	if !verifyOnly {
+		cdrecord, err = find("cdrecord")
+		if err != nil {
+			return commandPaths{}, err
+		}
+	}
 	cdrdao, err := find("cdrdao")
 	if err != nil {
 		return commandPaths{}, err
@@ -155,7 +164,12 @@ func findCommands() (commandPaths, error) {
 		return commandPaths{}, err
 	}
 
-	return commandPaths{cdrdao: cdrdao, drutil: drutil, diskutil: diskutil}, nil
+	return commandPaths{
+		cdrecord: cdrecord,
+		cdrdao:   cdrdao,
+		drutil:   drutil,
+		diskutil: diskutil,
+	}, nil
 }
 
 type commandRunner interface {

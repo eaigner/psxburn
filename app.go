@@ -38,10 +38,10 @@ func (app application) execute(ctx context.Context, image image, verifyOnly bool
 			filepath.Dir(image.cuePath),
 			app.stdout,
 			app.stderr,
-			app.commands.cdrdao,
-			"write",
-			"-n",
-			filepath.Base(image.cuePath),
+			app.commands.cdrecord,
+			"-v",
+			"-raw96r",
+			"cuefile="+filepath.Base(image.cuePath),
 		); err != nil {
 			return fmt.Errorf("burn disc: %w", err)
 		}

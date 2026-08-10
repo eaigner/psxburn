@@ -74,7 +74,7 @@ func TestVerifyWorkflowUnmountsReadsAndEjects(t *testing.T) {
 
 	var stdout bytes.Buffer
 	app := application{
-		commands: commandPaths{cdrdao: "cdrdao", drutil: "drutil", diskutil: "diskutil"},
+		commands: commandPaths{cdrecord: "cdrecord", cdrdao: "cdrdao", drutil: "drutil", diskutil: "diskutil"},
 		runner:   runner,
 		stdout:   &stdout,
 		stderr:   io.Discard,
@@ -116,7 +116,7 @@ func TestVerificationFailureStillEjects(t *testing.T) {
 	}
 
 	app := application{
-		commands: commandPaths{cdrdao: "cdrdao", drutil: "drutil", diskutil: "diskutil"},
+		commands: commandPaths{cdrecord: "cdrecord", cdrdao: "cdrdao", drutil: "drutil", diskutil: "diskutil"},
 		runner:   runner,
 		stdout:   io.Discard,
 		stderr:   io.Discard,
@@ -138,7 +138,7 @@ func TestBurnWorkflowUnmountsOnlyAtStart(t *testing.T) {
 	cuePath := filepath.Join(t.TempDir(), "game.cue")
 	runner := &fakeCommandRunner{status: "Name: /dev/disk4\n"}
 	runner.onRun = func(name string, args []string) error {
-		if name != "cdrdao" || args[0] == "write" {
+		if name != "cdrdao" {
 			return nil
 		}
 		dataPath, tocPath := readbackPaths(t, args)
@@ -149,7 +149,7 @@ func TestBurnWorkflowUnmountsOnlyAtStart(t *testing.T) {
 	}
 
 	app := application{
-		commands: commandPaths{cdrdao: "cdrdao", drutil: "drutil", diskutil: "diskutil"},
+		commands: commandPaths{cdrecord: "cdrecord", cdrdao: "cdrdao", drutil: "drutil", diskutil: "diskutil"},
 		runner:   runner,
 		stdout:   io.Discard,
 		stderr:   io.Discard,
@@ -166,7 +166,7 @@ func TestBurnWorkflowUnmountsOnlyAtStart(t *testing.T) {
 		t.Fatalf("execute() error = %v", err)
 	}
 
-	wantCommands := []string{"diskutil", "cdrdao", "cdrdao", "drutil"}
+	wantCommands := []string{"diskutil", "cdrecord", "cdrdao", "drutil"}
 	if len(runner.runs) != len(wantCommands) {
 		t.Fatalf("commands = %v, want %v", runner.runs, wantCommands)
 	}
@@ -175,17 +175,20 @@ func TestBurnWorkflowUnmountsOnlyAtStart(t *testing.T) {
 			t.Fatalf("command %d = %q, want %q", index, runner.runs[index][0], want)
 		}
 	}
-	if got := runner.runs[1][1]; got != "write" {
-		t.Fatalf("first cdrdao command = %q, want write", got)
+	if got := runner.runs[1][1]; got != "-v" {
+		t.Fatalf("cdrecord verbosity option = %q, want -v", got)
+	}
+	if got := runner.runs[1][2]; got != "-raw96r" {
+		t.Fatalf("cdrecord mode = %q, want -raw96r", got)
 	}
 	if got := runner.runDirs[1]; got != filepath.Dir(cuePath) {
 		t.Fatalf("burn working directory = %q, want %q", got, filepath.Dir(cuePath))
 	}
-	if got := runner.runs[1][3]; got != filepath.Base(cuePath) {
-		t.Fatalf("burn CUE argument = %q, want %q", got, filepath.Base(cuePath))
+	if got := runner.runs[1][3]; got != "cuefile="+filepath.Base(cuePath) {
+		t.Fatalf("burn CUE argument = %q, want %q", got, "cuefile="+filepath.Base(cuePath))
 	}
 	if got := runner.runs[2][1]; got != "read-cd" {
-		t.Fatalf("second cdrdao command = %q, want read-cd", got)
+		t.Fatalf("cdrdao command = %q, want read-cd", got)
 	}
 }
 
@@ -199,7 +202,7 @@ func TestReadFailureDoesNotEject(t *testing.T) {
 	}
 
 	app := application{
-		commands: commandPaths{cdrdao: "cdrdao", drutil: "drutil", diskutil: "diskutil"},
+		commands: commandPaths{cdrecord: "cdrecord", cdrdao: "cdrdao", drutil: "drutil", diskutil: "diskutil"},
 		runner:   runner,
 		stdout:   io.Discard,
 		stderr:   io.Discard,
