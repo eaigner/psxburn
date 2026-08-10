@@ -1,8 +1,13 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseDiscDevices(t *testing.T) {
@@ -42,5 +47,53 @@ func TestRawDiscDeviceUsesCharacterDevice(t *testing.T) {
 		if got := rawDiscDevice(device); got != want {
 			t.Errorf("rawDiscDevice(%q) = %q, want %q", device, got, want)
 		}
+	}
+}
+
+func TestPollForRawDiscDeviceRedetectsUntilRawNodeIsReady(t *testing.T) {
+	runner := &fakeCommandRunner{outputStatuses: []string{
+		"Type: No Media Inserted\n",
+		"Name: /dev/disk5\n",
+	}}
+	readyCalls := 0
+
+	got, err := pollForRawDiscDevice(
+		context.Background(),
+		runner,
+		"drutil",
+		0,
+		func(path string) error {
+			readyCalls++
+			if path != "/dev/rdisk5" {
+				t.Fatalf("raw device = %q, want /dev/rdisk5", path)
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("pollForRawDiscDevice() error = %v", err)
+	}
+	if got != "/dev/disk5" {
+		t.Fatalf("pollForRawDiscDevice() = %q, want /dev/disk5", got)
+	}
+	if runner.outputCalls != 2 || readyCalls != 1 {
+		t.Fatalf("status calls = %d, readiness calls = %d, want 2 and 1", runner.outputCalls, readyCalls)
+	}
+}
+
+func TestPollForRawDiscDeviceReportsLastReadinessFailureOnCancellation(t *testing.T) {
+	runner := &fakeCommandRunner{status: "Name: /dev/disk4\n"}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, err := pollForRawDiscDevice(ctx, runner, "drutil", time.Hour, func(string) error {
+		cancel()
+		return os.ErrNotExist
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("pollForRawDiscDevice() error = %v, want context cancellation", err)
+	}
+	if !strings.Contains(err.Error(), os.ErrNotExist.Error()) {
+		t.Fatalf("pollForRawDiscDevice() error = %v, want last readiness failure", err)
 	}
 }

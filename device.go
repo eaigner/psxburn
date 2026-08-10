@@ -4,11 +4,18 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"strings"
+	"time"
 )
 
 var discDevicePattern = regexp.MustCompile(`\bName:\s*(/dev/(?:r)?disk[0-9]+)\b`)
+
+const (
+	finalizedDiscTimeout = 30 * time.Second
+	discDevicePollDelay  = 250 * time.Millisecond
+)
 
 func detectDiscDevice(ctx context.Context, runner commandRunner, drutil string) (string, error) {
 	output, commandErr := runner.output(ctx, drutil, "status")
@@ -47,6 +54,57 @@ func rawDiscDevice(device string) string {
 		return "/dev/rdisk" + strings.TrimPrefix(device, "/dev/disk")
 	}
 	return device
+}
+
+func waitForRawDiscDevice(ctx context.Context, runner commandRunner, drutil string) (string, error) {
+	return pollForRawDiscDevice(ctx, runner, drutil, discDevicePollDelay, func(path string) error {
+		_, err := os.Stat(path)
+		return err
+	})
+}
+
+func pollForRawDiscDevice(
+	ctx context.Context,
+	runner commandRunner,
+	drutil string,
+	retryDelay time.Duration,
+	ready func(string) error,
+) (string, error) {
+	var lastErr error
+	for {
+		if err := context.Cause(ctx); err != nil {
+			return "", finalizedDiscWaitError(err, lastErr)
+		}
+
+		device, err := detectDiscDevice(ctx, runner, drutil)
+		if err == nil {
+			err = ready(rawDiscDevice(device))
+			if err == nil {
+				return device, nil
+			}
+		}
+		lastErr = err
+
+		timer := time.NewTimer(retryDelay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return "", finalizedDiscWaitError(context.Cause(ctx), lastErr)
+		case <-timer.C:
+		}
+	}
+}
+
+func finalizedDiscWaitError(cause, lastErr error) error {
+	if lastErr == nil {
+		return cause
+	}
+	return fmt.Errorf("%w (last readiness check: %v)", cause, lastErr)
 }
 
 func unmountDisc(

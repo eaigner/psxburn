@@ -16,6 +16,7 @@ type application struct {
 	stderr         io.Writer
 	waitBeforeBurn func(context.Context, io.Writer, int) error
 	readDisc       func(context.Context, string, string, []sectorRange) error
+	waitForDisc    func(context.Context, commandRunner, string) (string, error)
 }
 
 func (app application) execute(ctx context.Context, image image, verifyOnly bool) error {
@@ -46,6 +47,21 @@ func (app application) execute(ctx context.Context, image image, verifyOnly bool
 			"cuefile="+filepath.Base(image.cuePath),
 		); err != nil {
 			return fmt.Errorf("burn disc: %w", err)
+		}
+
+		fmt.Fprintln(app.stdout, "Waiting for finalized disc device...")
+		waitForDisc := app.waitForDisc
+		if waitForDisc == nil {
+			waitForDisc = waitForRawDiscDevice
+		}
+		waitCtx, cancelWait := context.WithTimeout(ctx, finalizedDiscTimeout)
+		device, err = waitForDisc(waitCtx, app.runner, app.commands.drutil)
+		cancelWait()
+		if err != nil {
+			return fmt.Errorf("wait for finalized disc: %w", err)
+		}
+		if err := unmountDisc(ctx, app.runner, app.commands.diskutil, device, app.stderr); err != nil {
+			return err
 		}
 	}
 

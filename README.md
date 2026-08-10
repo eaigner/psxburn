@@ -5,6 +5,9 @@ mode, reads the disc back directly from macOS's raw optical-disc device, and
 verifies the raw sectors with SHA-256. It holds a macOS idle sleep assertion for
 the lifetime of the process.
 
+After fixation, `psxburn` waits for macOS to publish the finalized disc's raw
+device, re-detects its disk identifier, and unmounts it again before read-back.
+
 Verification first checks the complete raw sector stream. If a drive has
 regenerated Mode 1 or Mode 2 framing, EDC, or ECC bytes, `psxburn` falls back
 to hashing the sector modes, subheaders, and user payloads. Audio sectors are

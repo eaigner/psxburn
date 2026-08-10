@@ -8,19 +8,27 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
 
 type fakeCommandRunner struct {
-	status  string
-	runs    [][]string
-	runDirs []string
-	onRun   func(name string, args []string) error
+	status         string
+	outputStatuses []string
+	outputCalls    int
+	runs           [][]string
+	runDirs        []string
+	onRun          func(name string, args []string) error
 }
 
 func (runner *fakeCommandRunner) output(context.Context, string, ...string) ([]byte, error) {
-	return []byte(runner.status), nil
+	status := runner.status
+	if runner.outputCalls < len(runner.outputStatuses) {
+		status = runner.outputStatuses[runner.outputCalls]
+	}
+	runner.outputCalls++
+	return []byte(status), nil
 }
 
 func (runner *fakeCommandRunner) run(
@@ -125,18 +133,26 @@ func TestVerificationFailureStillEjects(t *testing.T) {
 	}
 }
 
-func TestBurnWorkflowUnmountsOnlyAtStart(t *testing.T) {
+func TestBurnWorkflowRedetectsAndUnmountsFinalizedDisc(t *testing.T) {
 	source := make([]byte, rawSectorSize)
 	cuePath := filepath.Join(t.TempDir(), "game.cue")
 	runner := &fakeCommandRunner{status: "Name: /dev/disk4\n"}
+	var readDevice string
 
 	app := application{
 		commands: commandPaths{cdrecord: "cdrecord", drutil: "drutil", diskutil: "diskutil"},
 		runner:   runner,
 		stdout:   io.Discard,
 		stderr:   io.Discard,
-		readDisc: func(_ context.Context, _, destination string, _ []sectorRange) error {
+		readDisc: func(_ context.Context, device, destination string, _ []sectorRange) error {
+			readDevice = device
 			return os.WriteFile(destination, source, 0o600)
+		},
+		waitForDisc: func(_ context.Context, _ commandRunner, drutil string) (string, error) {
+			if drutil != "drutil" {
+				t.Fatalf("drutil = %q, want drutil", drutil)
+			}
+			return "/dev/disk5", nil
 		},
 		waitBeforeBurn: func(context.Context, io.Writer, int) error {
 			return nil
@@ -152,7 +168,7 @@ func TestBurnWorkflowUnmountsOnlyAtStart(t *testing.T) {
 		t.Fatalf("execute() error = %v", err)
 	}
 
-	wantCommands := []string{"diskutil", "cdrecord", "drutil"}
+	wantCommands := []string{"diskutil", "cdrecord", "diskutil", "drutil"}
 	if len(runner.runs) != len(wantCommands) {
 		t.Fatalf("commands = %v, want %v", runner.runs, wantCommands)
 	}
@@ -172,6 +188,51 @@ func TestBurnWorkflowUnmountsOnlyAtStart(t *testing.T) {
 	}
 	if got := runner.runs[1][3]; got != "cuefile="+filepath.Base(cuePath) {
 		t.Fatalf("burn CUE argument = %q, want %q", got, "cuefile="+filepath.Base(cuePath))
+	}
+	if got := runner.runs[2]; !reflect.DeepEqual(got, []string{"diskutil", "unmountDisk", "/dev/disk5"}) {
+		t.Fatalf("post-burn unmount = %q, want finalized device", got)
+	}
+	if readDevice != "/dev/rdisk5" {
+		t.Fatalf("read device = %q, want /dev/rdisk5", readDevice)
+	}
+}
+
+func TestBurnWorkflowStopsWhenFinalizedDiscDoesNotBecomeReady(t *testing.T) {
+	cuePath := filepath.Join(t.TempDir(), "game.cue")
+	runner := &fakeCommandRunner{status: "Name: /dev/disk4\n"}
+	readCalled := false
+
+	app := application{
+		commands: commandPaths{cdrecord: "cdrecord", drutil: "drutil", diskutil: "diskutil"},
+		runner:   runner,
+		stdout:   io.Discard,
+		stderr:   io.Discard,
+		readDisc: func(context.Context, string, string, []sectorRange) error {
+			readCalled = true
+			return nil
+		},
+		waitForDisc: func(context.Context, commandRunner, string) (string, error) {
+			return "", errors.New("raw device unavailable")
+		},
+		waitBeforeBurn: func(context.Context, io.Writer, int) error {
+			return nil
+		},
+	}
+	err := app.execute(context.Background(), image{cuePath: cuePath}, false)
+	if err == nil || !strings.Contains(err.Error(), "wait for finalized disc") {
+		t.Fatalf("execute() error = %v, want finalized disc error", err)
+	}
+	if readCalled {
+		t.Fatal("readDisc() called before the finalized disc became ready")
+	}
+	wantCommands := []string{"diskutil", "cdrecord"}
+	if len(runner.runs) != len(wantCommands) {
+		t.Fatalf("commands = %v, want %v", runner.runs, wantCommands)
+	}
+	for index, want := range wantCommands {
+		if runner.runs[index][0] != want {
+			t.Fatalf("command %d = %q, want %q", index, runner.runs[index][0], want)
+		}
 	}
 }
 
