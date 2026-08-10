@@ -33,14 +33,15 @@ func (app application) execute(ctx context.Context, image image, verifyOnly bool
 		if err := waitBeforeBurn(ctx, app.stdout, 3); err != nil {
 			return fmt.Errorf("burn cancelled: %w", err)
 		}
-		if err := app.runner.run(
+		if err := app.runner.runInDir(
 			ctx,
+			filepath.Dir(image.cuePath),
 			app.stdout,
 			app.stderr,
 			app.commands.cdrdao,
 			"write",
 			"-n",
-			image.cuePath,
+			filepath.Base(image.cuePath),
 		); err != nil {
 			return fmt.Errorf("burn disc: %w", err)
 		}

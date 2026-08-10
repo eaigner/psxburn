@@ -7,14 +7,16 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 type fakeCommandRunner struct {
-	status string
-	runs   [][]string
-	onRun  func(name string, args []string) error
+	status  string
+	runs    [][]string
+	runDirs []string
+	onRun   func(name string, args []string) error
 }
 
 func (runner *fakeCommandRunner) output(context.Context, string, ...string) ([]byte, error) {
@@ -28,8 +30,24 @@ func (runner *fakeCommandRunner) run(
 	name string,
 	args ...string,
 ) error {
+	return runner.recordRun("", name, args)
+}
+
+func (runner *fakeCommandRunner) runInDir(
+	_ context.Context,
+	directory string,
+	_ io.Writer,
+	_ io.Writer,
+	name string,
+	args ...string,
+) error {
+	return runner.recordRun(directory, name, args)
+}
+
+func (runner *fakeCommandRunner) recordRun(directory, name string, args []string) error {
 	call := append([]string{name}, args...)
 	runner.runs = append(runner.runs, call)
+	runner.runDirs = append(runner.runDirs, directory)
 	if runner.onRun != nil {
 		return runner.onRun(name, args)
 	}
@@ -117,6 +135,7 @@ func TestVerificationFailureStillEjects(t *testing.T) {
 
 func TestBurnWorkflowUnmountsOnlyAtStart(t *testing.T) {
 	source := make([]byte, rawSectorSize)
+	cuePath := filepath.Join(t.TempDir(), "game.cue")
 	runner := &fakeCommandRunner{status: "Name: /dev/disk4\n"}
 	runner.onRun = func(name string, args []string) error {
 		if name != "cdrdao" || args[0] == "write" {
@@ -139,7 +158,7 @@ func TestBurnWorkflowUnmountsOnlyAtStart(t *testing.T) {
 		},
 	}
 	err := app.execute(context.Background(), image{
-		cuePath:    "game.cue",
+		cuePath:    cuePath,
 		byteLength: int64(len(source)),
 		rawHash:    sha256.Sum256(source),
 	}, false)
@@ -158,6 +177,12 @@ func TestBurnWorkflowUnmountsOnlyAtStart(t *testing.T) {
 	}
 	if got := runner.runs[1][1]; got != "write" {
 		t.Fatalf("first cdrdao command = %q, want write", got)
+	}
+	if got := runner.runDirs[1]; got != filepath.Dir(cuePath) {
+		t.Fatalf("burn working directory = %q, want %q", got, filepath.Dir(cuePath))
+	}
+	if got := runner.runs[1][3]; got != filepath.Base(cuePath) {
+		t.Fatalf("burn CUE argument = %q, want %q", got, filepath.Base(cuePath))
 	}
 	if got := runner.runs[2][1]; got != "read-cd" {
 		t.Fatalf("second cdrdao command = %q, want read-cd", got)

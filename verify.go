@@ -99,22 +99,31 @@ func verifyReadback(
 }
 
 func hashImageSectors(reader io.Reader, sectorCount int64) ([sha256.Size]byte, [sha256.Size]byte, error) {
-	buffered := bufio.NewReaderSize(reader, 1024*1024)
 	rawHasher := sha256.New()
 	contentHasher := sha256.New()
+	if err := hashImageSectorsInto(reader, sectorCount, 0, rawHasher, contentHasher); err != nil {
+		return [sha256.Size]byte{}, [sha256.Size]byte{}, err
+	}
+	return hashSum(rawHasher), hashSum(contentHasher), nil
+}
+
+func hashImageSectorsInto(
+	reader io.Reader,
+	sectorCount int64,
+	sectorOffset int64,
+	rawHasher hash.Hash,
+	contentHasher hash.Hash,
+) error {
+	buffered := bufio.NewReaderSize(reader, 1024*1024)
 	sector := make([]byte, rawSectorSize)
 	for sectorNumber := int64(0); sectorNumber < sectorCount; sectorNumber++ {
 		if _, err := io.ReadFull(buffered, sector); err != nil {
-			return [sha256.Size]byte{}, [sha256.Size]byte{}, fmt.Errorf("read sector %d: %w", sectorNumber, err)
+			return fmt.Errorf("read sector %d: %w", sectorOffset+sectorNumber, err)
 		}
 		_, _ = rawHasher.Write(sector)
 		hashSectorContent(contentHasher, sector)
 	}
-
-	var rawSum, contentSum [sha256.Size]byte
-	copy(rawSum[:], rawHasher.Sum(nil))
-	copy(contentSum[:], contentHasher.Sum(nil))
-	return rawSum, contentSum, nil
+	return nil
 }
 
 func hashSectorContent(hasher hash.Hash, sector []byte) {

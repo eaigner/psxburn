@@ -160,19 +160,32 @@ func findCommands() (commandPaths, error) {
 
 type commandRunner interface {
 	run(context.Context, io.Writer, io.Writer, string, ...string) error
+	runInDir(context.Context, string, io.Writer, io.Writer, string, ...string) error
 	output(context.Context, string, ...string) ([]byte, error)
 }
 
 type systemCommandRunner struct{}
 
-func (systemCommandRunner) run(
+func (runner systemCommandRunner) run(
 	ctx context.Context,
 	stdout io.Writer,
 	stderr io.Writer,
 	name string,
 	args ...string,
 ) error {
+	return runner.runInDir(ctx, "", stdout, stderr, name, args...)
+}
+
+func (systemCommandRunner) runInDir(
+	ctx context.Context,
+	directory string,
+	stdout io.Writer,
+	stderr io.Writer,
+	name string,
+	args ...string,
+) error {
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = directory
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	return cmd.Run()
