@@ -4,6 +4,11 @@
 disc back, and verifies the raw sectors with SHA-256. It holds a macOS idle
 sleep assertion for the lifetime of the process.
 
+Verification first checks the complete raw sector stream. If a drive has
+regenerated Mode 1 or Mode 2 framing, EDC, or ECC bytes, `psxburn` falls back
+to hashing the sector modes, subheaders, and user payloads. Audio sectors are
+always compared in full.
+
 ## Requirements
 
 - macOS

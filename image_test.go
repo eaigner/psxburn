@@ -73,8 +73,8 @@ func TestInspectImageUsesSameStemBinInsteadOfFileDirective(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inspectImage() error = %v", err)
 	}
-	if got.hash != sha256.Sum256(data) {
-		t.Fatalf("inspectImage().hash = %x, want %x", got.hash, sha256.Sum256(data))
+	if got.rawHash != sha256.Sum256(data) {
+		t.Fatalf("inspectImage().rawHash = %x, want %x", got.rawHash, sha256.Sum256(data))
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"strconv"
@@ -12,14 +13,17 @@ import (
 )
 
 type verificationResult struct {
-	discHash [sha256.Size]byte
-	offset   int64
-	matched  bool
+	discRawHash     [sha256.Size]byte
+	discContentHash [sha256.Size]byte
+	offset          int64
+	matched         bool
+	rawMatched      bool
 }
 
 func verifyReadback(
 	discPath string,
-	sourceHash [sha256.Size]byte,
+	sourceRawHash [sha256.Size]byte,
+	sourceContentHash [sha256.Size]byte,
 	sourceBytes int64,
 	start int64,
 ) (verificationResult, error) {
@@ -48,26 +52,110 @@ func verifyReadback(
 			continue
 		}
 
-		hash, err := hashSection(disc, candidate*rawSectorSize, sourceBytes)
+		rawHash, err := hashSection(disc, candidate*rawSectorSize, sourceBytes)
 		if err != nil {
 			return verificationResult{}, fmt.Errorf("hash disc read-back at sector %d: %w", candidate, err)
 		}
 		if !tested {
-			result.discHash = hash
+			result.discRawHash = rawHash
 			result.offset = candidate
 			tested = true
 		}
-		if hash == sourceHash {
-			result.discHash = hash
+		if rawHash == sourceRawHash {
+			result.discRawHash = rawHash
 			result.offset = candidate
 			result.matched = true
+			result.rawMatched = true
 			return result, nil
 		}
 	}
 	if !tested {
 		return verificationResult{}, errors.New("disc read-back does not contain enough sectors for the source image")
 	}
+
+	for _, candidate := range candidates {
+		if candidate < 0 || candidate+sourceSectors > discSectors {
+			continue
+		}
+		rawHash, contentHash, err := hashImageSectors(
+			io.NewSectionReader(disc, candidate*rawSectorSize, sourceBytes),
+			sourceSectors,
+		)
+		if err != nil {
+			return verificationResult{}, fmt.Errorf("hash logical disc content at sector %d: %w", candidate, err)
+		}
+		if result.discContentHash == ([sha256.Size]byte{}) {
+			result.discContentHash = contentHash
+		}
+		if contentHash == sourceContentHash {
+			result.discRawHash = rawHash
+			result.discContentHash = contentHash
+			result.offset = candidate
+			result.matched = true
+			return result, nil
+		}
+	}
 	return result, nil
+}
+
+func hashImageSectors(reader io.Reader, sectorCount int64) ([sha256.Size]byte, [sha256.Size]byte, error) {
+	buffered := bufio.NewReaderSize(reader, 1024*1024)
+	rawHasher := sha256.New()
+	contentHasher := sha256.New()
+	sector := make([]byte, rawSectorSize)
+	for sectorNumber := int64(0); sectorNumber < sectorCount; sectorNumber++ {
+		if _, err := io.ReadFull(buffered, sector); err != nil {
+			return [sha256.Size]byte{}, [sha256.Size]byte{}, fmt.Errorf("read sector %d: %w", sectorNumber, err)
+		}
+		_, _ = rawHasher.Write(sector)
+		hashSectorContent(contentHasher, sector)
+	}
+
+	var rawSum, contentSum [sha256.Size]byte
+	copy(rawSum[:], rawHasher.Sum(nil))
+	copy(contentSum[:], contentHasher.Sum(nil))
+	return rawSum, contentSum, nil
+}
+
+func hashSectorContent(hasher hash.Hash, sector []byte) {
+	mode := rawSectorMode(sector)
+	switch mode {
+	case 1:
+		_, _ = hasher.Write([]byte{1})
+		_, _ = hasher.Write(sector[16:2064])
+	case 2:
+		if (sector[18]^sector[22])&0x20 != 0 {
+			_, _ = hasher.Write([]byte{0})
+			_, _ = hasher.Write(sector)
+			return
+		}
+		form2 := sector[18]&0x20 != 0
+		if form2 {
+			_, _ = hasher.Write([]byte{3})
+			_, _ = hasher.Write(sector[16:2348])
+			return
+		}
+		_, _ = hasher.Write([]byte{2})
+		_, _ = hasher.Write(sector[16:2072])
+	default:
+		_, _ = hasher.Write([]byte{0})
+		_, _ = hasher.Write(sector)
+	}
+}
+
+func rawSectorMode(sector []byte) byte {
+	if len(sector) != int(rawSectorSize) || sector[0] != 0 || sector[11] != 0 {
+		return 0
+	}
+	for _, value := range sector[1:11] {
+		if value != 0xff {
+			return 0
+		}
+	}
+	if sector[15] != 1 && sector[15] != 2 {
+		return 0
+	}
+	return sector[15]
 }
 
 func candidateOffsets(offsets ...int64) []int64 {

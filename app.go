@@ -88,17 +88,25 @@ func (app application) readAndVerify(ctx context.Context, image image) (bool, er
 	if err != nil {
 		return true, err
 	}
-	result, err := verifyReadback(discPath, image.hash, image.byteLength, start)
+	result, err := verifyReadback(discPath, image.rawHash, image.contentHash, image.byteLength, start)
 	if err != nil {
 		return true, err
 	}
 
-	fmt.Fprintf(app.stdout, "Source SHA-256: %x\n", image.hash)
-	fmt.Fprintf(app.stdout, "Disc SHA-256:   %x\n", result.discHash)
+	fmt.Fprintf(app.stdout, "Source SHA-256: %x\n", image.rawHash)
+	fmt.Fprintf(app.stdout, "Disc SHA-256:   %x\n", result.discRawHash)
 	if result.matched {
-		fmt.Fprintf(app.stdout, "VERIFICATION PASSED (matched at raw sector offset %d)\n", result.offset)
+		if result.rawMatched {
+			fmt.Fprintf(app.stdout, "VERIFICATION PASSED (raw sectors matched at offset %d)\n", result.offset)
+			return true, nil
+		}
+		fmt.Fprintf(app.stdout, "Source content SHA-256: %x\n", image.contentHash)
+		fmt.Fprintf(app.stdout, "Disc content SHA-256:   %x\n", result.discContentHash)
+		fmt.Fprintf(app.stdout, "VERIFICATION PASSED (sector content matched at offset %d; raw framing or integrity bytes differ)\n", result.offset)
 		return true, nil
 	}
+	fmt.Fprintf(app.stdout, "Source content SHA-256: %x\n", image.contentHash)
+	fmt.Fprintf(app.stdout, "Disc content SHA-256:   %x\n", result.discContentHash)
 	fmt.Fprintln(app.stderr, "VERIFICATION FAILED")
 	return true, errVerificationFailed
 }

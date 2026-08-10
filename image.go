@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,9 +13,10 @@ import (
 const rawSectorSize int64 = 2352
 
 type image struct {
-	cuePath    string
-	byteLength int64
-	hash       [sha256.Size]byte
+	cuePath     string
+	byteLength  int64
+	rawHash     [sha256.Size]byte
+	contentHash [sha256.Size]byte
 }
 
 type cueInfo struct {
@@ -49,18 +49,16 @@ func inspectImage(cuePath string) (image, error) {
 	if err != nil {
 		return image{}, err
 	}
-	hash, byteLength, err := hashFile(binPath)
+	rawHash, contentHash, byteLength, err := hashImageFile(binPath)
 	if err != nil {
 		return image{}, fmt.Errorf("hash BIN: %w", err)
 	}
-	if byteLength%rawSectorSize != 0 {
-		return image{}, fmt.Errorf("BIN size %d is not a multiple of %d bytes", byteLength, rawSectorSize)
-	}
 
 	return image{
-		cuePath:    absCuePath,
-		byteLength: byteLength,
-		hash:       hash,
+		cuePath:     absCuePath,
+		byteLength:  byteLength,
+		rawHash:     rawHash,
+		contentHash: contentHash,
 	}, nil
 }
 
@@ -130,20 +128,21 @@ func resolveBinPath(cuePath string) (string, error) {
 	return "", fmt.Errorf("BIN not found; expected %q or %q", candidates[0], candidates[1])
 }
 
-func hashFile(path string) ([sha256.Size]byte, int64, error) {
+func hashImageFile(path string) ([sha256.Size]byte, [sha256.Size]byte, int64, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return [sha256.Size]byte{}, 0, err
+		return [sha256.Size]byte{}, [sha256.Size]byte{}, 0, err
 	}
 	defer file.Close()
 
-	hasher := sha256.New()
-	byteLength, err := io.Copy(hasher, file)
+	stat, err := file.Stat()
 	if err != nil {
-		return [sha256.Size]byte{}, 0, err
+		return [sha256.Size]byte{}, [sha256.Size]byte{}, 0, err
+	}
+	if stat.Size()%rawSectorSize != 0 {
+		return [sha256.Size]byte{}, [sha256.Size]byte{}, 0, fmt.Errorf("BIN size %d is not a multiple of %d bytes", stat.Size(), rawSectorSize)
 	}
 
-	var sum [sha256.Size]byte
-	copy(sum[:], hasher.Sum(nil))
-	return sum, byteLength, nil
+	rawHash, contentHash, err := hashImageSectors(file, stat.Size()/rawSectorSize)
+	return rawHash, contentHash, stat.Size(), err
 }

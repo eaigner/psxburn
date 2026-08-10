@@ -63,7 +63,7 @@ func TestVerifyWorkflowUnmountsReadsAndEjects(t *testing.T) {
 	}
 	err := app.execute(context.Background(), image{
 		byteLength: int64(len(source)),
-		hash:       sha256.Sum256(source),
+		rawHash:    sha256.Sum256(source),
 	}, true)
 	if err != nil {
 		t.Fatalf("execute() error = %v", err)
@@ -78,7 +78,7 @@ func TestVerifyWorkflowUnmountsReadsAndEjects(t *testing.T) {
 			t.Fatalf("command %d = %q, want %q", index, runner.runs[index][0], want)
 		}
 	}
-	if !strings.Contains(stdout.String(), "VERIFICATION PASSED (matched at raw sector offset 150)") {
+	if !strings.Contains(stdout.String(), "VERIFICATION PASSED (raw sectors matched at offset 150)") {
 		t.Fatalf("stdout = %q, want successful verification", stdout.String())
 	}
 }
@@ -105,7 +105,7 @@ func TestVerificationFailureStillEjects(t *testing.T) {
 	}
 	err := app.execute(context.Background(), image{
 		byteLength: int64(len(source)),
-		hash:       sha256.Sum256(source),
+		rawHash:    sha256.Sum256(source),
 	}, true)
 	if !errors.Is(err, errVerificationFailed) {
 		t.Fatalf("execute() error = %v, want verification failure", err)
@@ -141,7 +141,7 @@ func TestBurnWorkflowUnmountsOnlyAtStart(t *testing.T) {
 	err := app.execute(context.Background(), image{
 		cuePath:    "game.cue",
 		byteLength: int64(len(source)),
-		hash:       sha256.Sum256(source),
+		rawHash:    sha256.Sum256(source),
 	}, false)
 	if err != nil {
 		t.Fatalf("execute() error = %v", err)
