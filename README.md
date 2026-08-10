@@ -18,6 +18,15 @@ them into the read-back image.
 - `cdrecord` available in `PATH` when burning
 - A CUE whose `FILE` directives refer to raw BIN files
 
+Install the external dependencies with Homebrew:
+
+```sh
+brew install cdrtools cdrdao
+```
+
+`cdrecord` is provided by `cdrtools`. `drutil`, `diskutil`, and `caffeinate`
+are included with macOS.
+
 Supported track modes are `MODE1/2352`, `MODE2/2352`, and `AUDIO`. At least
 one data track is required. Single- and multi-BIN CUE images are supported;
 relative `FILE` paths are resolved from the CUE's directory.
@@ -27,10 +36,10 @@ main-channel sectors instead of regenerating Mode 2 XA EDC/ECC. The optical
 drive must support RAW/R96R writing. `cdrecord` auto-selects the burner, so only
 one optical writer should be connected.
 
-## Build
+## Install psxburn
 
 ```sh
-go build .
+go install
 ```
 
 ## Usage
