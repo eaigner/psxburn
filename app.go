@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 type application struct {
@@ -14,6 +15,7 @@ type application struct {
 	stdout         io.Writer
 	stderr         io.Writer
 	waitBeforeBurn func(context.Context, io.Writer, int) error
+	readDisc       func(context.Context, string, string, []sectorRange) error
 }
 
 func (app application) execute(ctx context.Context, image image, verifyOnly bool) error {
@@ -47,7 +49,7 @@ func (app application) execute(ctx context.Context, image image, verifyOnly bool
 		}
 	}
 
-	readbackComplete, verificationErr := app.readAndVerify(ctx, image)
+	readbackComplete, verificationErr := app.readAndVerify(ctx, image, device)
 	if !readbackComplete {
 		return verificationErr
 	}
@@ -62,7 +64,7 @@ func (app application) execute(ctx context.Context, image image, verifyOnly bool
 	return verificationErr
 }
 
-func (app application) readAndVerify(ctx context.Context, image image) (bool, error) {
+func (app application) readAndVerify(ctx context.Context, image image, device string) (bool, error) {
 	tempDir, err := os.MkdirTemp("", "psxburn-")
 	if err != nil {
 		return false, fmt.Errorf("create temporary directory: %w", err)
@@ -70,26 +72,18 @@ func (app application) readAndVerify(ctx context.Context, image image) (bool, er
 	defer os.RemoveAll(tempDir)
 
 	discPath := filepath.Join(tempDir, "disc.bin")
-	tocPath := filepath.Join(tempDir, "disc.toc")
-	if err := app.runner.run(
-		ctx,
-		app.stdout,
-		app.stderr,
-		app.commands.cdrdao,
-		"read-cd",
-		"--read-raw",
-		"--paranoia-mode", "0",
-		"--datafile", discPath,
-		tocPath,
-	); err != nil {
+	readDisc := app.readDisc
+	if readDisc == nil {
+		readDisc = readRawDisc
+	}
+	rawDevice := rawDiscDevice(device)
+	fmt.Fprintf(app.stdout, "Reading %d sectors from %s...\n", image.byteLength/rawSectorSize, rawDevice)
+	if err := readDisc(ctx, rawDevice, discPath, image.readRanges); err != nil {
 		return false, fmt.Errorf("read disc: %w", err)
 	}
+	fmt.Fprintln(app.stdout, "Disc read-back complete.")
 
-	start, err := readTOCStart(tocPath)
-	if err != nil {
-		return true, err
-	}
-	result, err := verifyReadback(discPath, image.rawHash, image.contentHash, image.byteLength, start)
+	result, err := verifyReadback(discPath, image.rawHash, image.contentHash, image.byteLength, 0)
 	if err != nil {
 		return true, err
 	}
@@ -110,4 +104,85 @@ func (app application) readAndVerify(ctx context.Context, image image) (bool, er
 	fmt.Fprintf(app.stdout, "Disc content SHA-256:   %x\n", result.discContentHash)
 	fmt.Fprintln(app.stderr, "VERIFICATION FAILED")
 	return true, errVerificationFailed
+}
+
+func readRawDisc(ctx context.Context, device, destination string, ranges []sectorRange) (returnErr error) {
+	source, err := syscall.Open(device, syscall.O_RDONLY, 0)
+	if err != nil {
+		return fmt.Errorf("open raw device %s: %w", device, err)
+	}
+	defer func() {
+		if err := syscall.Close(source); returnErr == nil && err != nil {
+			returnErr = fmt.Errorf("close raw device %s: %w", device, err)
+		}
+	}()
+
+	disc, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("create disc read-back: %w", err)
+	}
+	defer func() {
+		if err := disc.Close(); returnErr == nil && err != nil {
+			returnErr = fmt.Errorf("close disc read-back: %w", err)
+		}
+	}()
+
+	// Darwin raw disk reads require a page-aligned destination buffer.
+	buffer, err := syscall.Mmap(
+		-1,
+		0,
+		int(rawSectorSize),
+		syscall.PROT_READ|syscall.PROT_WRITE,
+		syscall.MAP_ANON|syscall.MAP_PRIVATE,
+	)
+	if err != nil {
+		return fmt.Errorf("allocate aligned read buffer: %w", err)
+	}
+	defer func() {
+		if err := syscall.Munmap(buffer); returnErr == nil && err != nil {
+			returnErr = fmt.Errorf("release aligned read buffer: %w", err)
+		}
+	}()
+
+	for _, sectorRange := range ranges {
+		if sectorRange.start < 0 || sectorRange.count < 0 {
+			return fmt.Errorf("invalid disc sector range %d+%d", sectorRange.start, sectorRange.count)
+		}
+		if _, err := syscall.Seek(source, sectorRange.start*rawSectorSize, io.SeekStart); err != nil {
+			return fmt.Errorf("seek raw device to sector %d: %w", sectorRange.start, err)
+		}
+
+		for sector := int64(0); sector < sectorRange.count; sector++ {
+			if err := context.Cause(ctx); err != nil {
+				return err
+			}
+			read, err := syscall.Read(source, buffer)
+			if err != nil {
+				return fmt.Errorf("read raw device at sector %d: %w", sectorRange.start+sector, err)
+			}
+			if read != len(buffer) {
+				return fmt.Errorf(
+					"read raw device at sector %d: got %d of %d bytes: %w",
+					sectorRange.start+sector,
+					read,
+					len(buffer),
+					io.ErrUnexpectedEOF,
+				)
+			}
+			written, err := disc.Write(buffer)
+			if err != nil {
+				return fmt.Errorf("write disc read-back at sector %d: %w", sectorRange.start+sector, err)
+			}
+			if written != len(buffer) {
+				return fmt.Errorf(
+					"write disc read-back at sector %d: wrote %d of %d bytes: %w",
+					sectorRange.start+sector,
+					written,
+					len(buffer),
+					io.ErrShortWrite,
+				)
+			}
+		}
+	}
+	return nil
 }

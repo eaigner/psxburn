@@ -32,3 +32,15 @@ func TestParseDiscDevicesFromDrutilBlankDiscStatus(t *testing.T) {
 		t.Fatalf("parseDiscDevices() = %q, want %q", got, want)
 	}
 }
+
+func TestRawDiscDeviceUsesCharacterDevice(t *testing.T) {
+	tests := map[string]string{
+		"/dev/disk26":  "/dev/rdisk26",
+		"/dev/rdisk26": "/dev/rdisk26",
+	}
+	for device, want := range tests {
+		if got := rawDiscDevice(device); got != want {
+			t.Errorf("rawDiscDevice(%q) = %q, want %q", device, got, want)
+		}
+	}
+}

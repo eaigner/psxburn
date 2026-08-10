@@ -42,6 +42,13 @@ func parseDiscDevices(output string) []string {
 	return devices
 }
 
+func rawDiscDevice(device string) string {
+	if strings.HasPrefix(device, "/dev/disk") {
+		return "/dev/rdisk" + strings.TrimPrefix(device, "/dev/disk")
+	}
+	return device
+}
+
 func unmountDisc(
 	ctx context.Context,
 	runner commandRunner,

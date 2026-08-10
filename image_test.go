@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -76,6 +77,10 @@ FILE "Track 2.bin" BINARY
 	if got.byteLength != int64(len(combined)) || got.rawHash != wantRaw || got.contentHash != wantContent {
 		t.Fatalf("inspectImage() = %+v, want length %d, raw %x, content %x", got, len(combined), wantRaw, wantContent)
 	}
+	wantRanges := []sectorRange{{start: 0, count: 1}, {start: 2, count: 1}}
+	if !reflect.DeepEqual(got.readRanges, wantRanges) {
+		t.Fatalf("inspectImage().readRanges = %+v, want %+v", got.readRanges, wantRanges)
+	}
 }
 
 func TestInspectImageUsesFileDirectiveInsteadOfSameStemBin(t *testing.T) {
@@ -104,6 +109,35 @@ func TestInspectImageUsesFileDirectiveInsteadOfSameStemBin(t *testing.T) {
 	}
 	if got.rawHash != sha256.Sum256(referencedData) {
 		t.Fatalf("inspectImage().rawHash = %x, want %x", got.rawHash, sha256.Sum256(referencedData))
+	}
+}
+
+func TestInspectImageMapsFirstTrackIndexOneToDiscSectorZero(t *testing.T) {
+	dir := t.TempDir()
+	cuePath := filepath.Join(dir, "game.cue")
+	content := `FILE "game.bin" BINARY
+  TRACK 01 MODE2/2352
+    INDEX 00 00:00:00
+    INDEX 01 00:00:01
+`
+	if err := os.WriteFile(cuePath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(dir, "game.bin"),
+		bytes.Repeat([]byte{0x11}, 3*int(rawSectorSize)),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := inspectImage(cuePath)
+	if err != nil {
+		t.Fatalf("inspectImage() error = %v", err)
+	}
+	want := []sectorRange{{start: 0, count: 2}}
+	if !reflect.DeepEqual(got.readRanges, want) {
+		t.Fatalf("inspectImage().readRanges = %+v, want %+v", got.readRanges, want)
 	}
 }
 
@@ -157,6 +191,10 @@ func TestInspectImageOmitsPregapWithinSharedBin(t *testing.T) {
 	}
 	if got.byteLength != int64(len(wantData)) || got.rawHash != wantRaw || got.contentHash != wantContent {
 		t.Fatalf("inspectImage() = %+v, want length %d, raw %x, content %x", got, len(wantData), wantRaw, wantContent)
+	}
+	wantRanges := []sectorRange{{start: 0, count: 2}, {start: 3, count: 2}}
+	if !reflect.DeepEqual(got.readRanges, wantRanges) {
+		t.Fatalf("inspectImage().readRanges = %+v, want %+v", got.readRanges, wantRanges)
 	}
 }
 

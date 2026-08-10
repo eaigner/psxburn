@@ -20,6 +20,12 @@ type image struct {
 	byteLength  int64
 	rawHash     [sha256.Size]byte
 	contentHash [sha256.Size]byte
+	readRanges  []sectorRange
+}
+
+type sectorRange struct {
+	start int64
+	count int64
 }
 
 type cueInfo struct {
@@ -60,7 +66,7 @@ func inspectImage(cuePath string) (image, error) {
 		return image{}, errors.New("CUE contains no MODE1/2352 or MODE2/2352 data track")
 	}
 
-	rawHash, contentHash, byteLength, err := hashCueImage(absCuePath, info)
+	rawHash, contentHash, byteLength, readRanges, err := hashCueImage(absCuePath, info)
 	if err != nil {
 		return image{}, err
 	}
@@ -70,6 +76,7 @@ func inspectImage(cuePath string) (image, error) {
 		byteLength:  byteLength,
 		rawHash:     rawHash,
 		contentHash: contentHash,
+		readRanges:  readRanges,
 	}, nil
 }
 
@@ -223,31 +230,40 @@ func resolveCueFilePath(cuePath, name string) string {
 	return filepath.Join(filepath.Dir(cuePath), name)
 }
 
-func hashCueImage(cuePath string, info cueInfo) ([sha256.Size]byte, [sha256.Size]byte, int64, error) {
+func hashCueImage(cuePath string, info cueInfo) (
+	[sha256.Size]byte,
+	[sha256.Size]byte,
+	int64,
+	[]sectorRange,
+	error,
+) {
 	rawHasher := sha256.New()
 	contentHasher := sha256.New()
 	var byteLength int64
 	var sectorOffset int64
+	var discSectorOffset int64
+	var readRanges []sectorRange
+	discOrigin := *info.files[0].tracks[0].index01
 
 	for _, cueFile := range info.files {
 		path := resolveCueFilePath(cuePath, cueFile.name)
 		file, err := os.Open(path)
 		if err != nil {
-			return [sha256.Size]byte{}, [sha256.Size]byte{}, 0, fmt.Errorf("open BIN %q: %w", path, err)
+			return [sha256.Size]byte{}, [sha256.Size]byte{}, 0, nil, fmt.Errorf("open BIN %q: %w", path, err)
 		}
 
 		stat, err := file.Stat()
 		if err != nil {
 			_ = file.Close()
-			return [sha256.Size]byte{}, [sha256.Size]byte{}, 0, fmt.Errorf("inspect BIN %q: %w", path, err)
+			return [sha256.Size]byte{}, [sha256.Size]byte{}, 0, nil, fmt.Errorf("inspect BIN %q: %w", path, err)
 		}
 		if stat.IsDir() {
 			_ = file.Close()
-			return [sha256.Size]byte{}, [sha256.Size]byte{}, 0, fmt.Errorf("BIN %q is a directory", path)
+			return [sha256.Size]byte{}, [sha256.Size]byte{}, 0, nil, fmt.Errorf("BIN %q is a directory", path)
 		}
 		if stat.Size()%rawSectorSize != 0 {
 			_ = file.Close()
-			return [sha256.Size]byte{}, [sha256.Size]byte{}, 0, fmt.Errorf(
+			return [sha256.Size]byte{}, [sha256.Size]byte{}, 0, nil, fmt.Errorf(
 				"BIN %q size %d is not a multiple of %d bytes",
 				path,
 				stat.Size(),
@@ -268,7 +284,7 @@ func hashCueImage(cuePath string, info cueInfo) ([sha256.Size]byte, [sha256.Size
 			}
 			if start > end {
 				_ = file.Close()
-				return [sha256.Size]byte{}, [sha256.Size]byte{}, 0, fmt.Errorf(
+				return [sha256.Size]byte{}, [sha256.Size]byte{}, 0, nil, fmt.Errorf(
 					"CUE track %02d starts at sector %d after its end at sector %d in BIN %q",
 					track.number,
 					start,
@@ -278,7 +294,7 @@ func hashCueImage(cuePath string, info cueInfo) ([sha256.Size]byte, [sha256.Size
 			}
 			if end > fileSectors {
 				_ = file.Close()
-				return [sha256.Size]byte{}, [sha256.Size]byte{}, 0, fmt.Errorf(
+				return [sha256.Size]byte{}, [sha256.Size]byte{}, 0, nil, fmt.Errorf(
 					"CUE track %02d ends at sector %d beyond BIN %q length of %d sectors",
 					track.number,
 					end,
@@ -297,18 +313,33 @@ func hashCueImage(cuePath string, info cueInfo) ([sha256.Size]byte, [sha256.Size
 			)
 			if err != nil {
 				_ = file.Close()
-				return [sha256.Size]byte{}, [sha256.Size]byte{}, 0, fmt.Errorf("hash BIN %q: %w", path, err)
+				return [sha256.Size]byte{}, [sha256.Size]byte{}, 0, nil, fmt.Errorf("hash BIN %q: %w", path, err)
+			}
+			if sectorCount > 0 {
+				readStart := discSectorOffset + start - discOrigin
+				if readStart < 0 {
+					_ = file.Close()
+					return [sha256.Size]byte{}, [sha256.Size]byte{}, 0, nil, fmt.Errorf(
+						"CUE track %02d maps before the readable disc origin",
+						track.number,
+					)
+				}
+				readRanges = append(readRanges, sectorRange{
+					start: readStart,
+					count: sectorCount,
+				})
 			}
 			byteLength += sectorCount * rawSectorSize
 			sectorOffset += sectorCount
 		}
 		closeErr := file.Close()
 		if closeErr != nil {
-			return [sha256.Size]byte{}, [sha256.Size]byte{}, 0, fmt.Errorf("close BIN %q: %w", path, closeErr)
+			return [sha256.Size]byte{}, [sha256.Size]byte{}, 0, nil, fmt.Errorf("close BIN %q: %w", path, closeErr)
 		}
+		discSectorOffset += fileSectors
 	}
 
-	return hashSum(rawHasher), hashSum(contentHasher), byteLength, nil
+	return hashSum(rawHasher), hashSum(contentHasher), byteLength, readRanges, nil
 }
 
 func hashSum(hasher hash.Hash) [sha256.Size]byte {

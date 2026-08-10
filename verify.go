@@ -193,31 +193,6 @@ func hashSection(file *os.File, offset, length int64) ([sha256.Size]byte, error)
 	return sum, nil
 }
 
-func readTOCStart(path string) (int64, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return 0, fmt.Errorf("open read-back TOC: %w", err)
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for lineNumber := 1; scanner.Scan(); lineNumber++ {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) < 2 || !strings.EqualFold(fields[0], "START") {
-			continue
-		}
-		sectors, err := parseMSF(fields[1])
-		if err != nil {
-			return 0, fmt.Errorf("read-back TOC line %d: %w", lineNumber, err)
-		}
-		return sectors, nil
-	}
-	if err := scanner.Err(); err != nil {
-		return 0, fmt.Errorf("read read-back TOC: %w", err)
-	}
-	return 0, nil
-}
-
 func parseMSF(value string) (int64, error) {
 	parts := strings.Split(value, ":")
 	if len(parts) != 3 {

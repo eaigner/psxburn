@@ -1,31 +1,35 @@
 # psxburn
 
 `psxburn` burns a RAW/2352 PlayStation disc image with `cdrecord` in RAW/96R
-mode, reads the disc back with `cdrdao`, and verifies the raw sectors with
-SHA-256. It holds a macOS idle sleep assertion for the lifetime of the process.
+mode, reads the disc back directly from macOS's raw optical-disc device, and
+verifies the raw sectors with SHA-256. It holds a macOS idle sleep assertion for
+the lifetime of the process.
 
 Verification first checks the complete raw sector stream. If a drive has
 regenerated Mode 1 or Mode 2 framing, EDC, or ECC bytes, `psxburn` falls back
 to hashing the sector modes, subheaders, and user payloads. Audio sectors are
 always compared in full. CUE `INDEX 00` pregaps are excluded from the source
-hash because `cdrdao read-cd` represents them in its TOC rather than copying
-them into the read-back image.
+hash. Direct read-back skips the corresponding physical sector ranges so the
+disc and source streams have the same layout during comparison.
+
+Verification covers the 2352-byte main channel. It does not verify P-W
+subchannels or LibCrypt data.
 
 ## Requirements
 
 - macOS
-- `cdrdao`, `drutil`, and `diskutil` available in `PATH`
+- `drutil` and `diskutil` available in `PATH`
 - `cdrecord` available in `PATH` when burning
 - A CUE whose `FILE` directives refer to raw BIN files
 
 Install the external dependencies with Homebrew:
 
 ```sh
-brew install cdrtools cdrdao
+brew install cdrtools
 ```
 
-`cdrecord` is provided by `cdrtools`. `drutil`, `diskutil`, and `caffeinate`
-are included with macOS.
+`cdrecord` is provided by `cdrtools`. `drutil`, `diskutil`, and `caffeinate` are
+included with macOS.
 
 Supported track modes are `MODE1/2352`, `MODE2/2352`, and `AUDIO`. At least
 one data track is required. Single- and multi-BIN CUE images are supported;

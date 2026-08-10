@@ -129,7 +129,6 @@ func selectCuePath(args []string, directory string) (string, error) {
 
 type commandPaths struct {
 	cdrecord string
-	cdrdao   string
 	drutil   string
 	diskutil string
 }
@@ -151,10 +150,6 @@ func findCommands(verifyOnly bool) (commandPaths, error) {
 			return commandPaths{}, err
 		}
 	}
-	cdrdao, err := find("cdrdao")
-	if err != nil {
-		return commandPaths{}, err
-	}
 	drutil, err := find("drutil")
 	if err != nil {
 		return commandPaths{}, err
@@ -166,7 +161,6 @@ func findCommands(verifyOnly bool) (commandPaths, error) {
 
 	return commandPaths{
 		cdrecord: cdrecord,
-		cdrdao:   cdrdao,
 		drutil:   drutil,
 		diskutil: diskutil,
 	}, nil
